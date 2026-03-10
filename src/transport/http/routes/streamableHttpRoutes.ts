@@ -153,13 +153,21 @@ export function setupStreamableHttpRoutes(
   });
 
   router.get(STREAMABLE_HTTP_ENDPOINT, ...middlewares, async (req: Request, res: Response) => {
+    let sessionId: string | undefined;
     try {
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      // Session id: header (preferred) or query (e.g. EventSource which cannot set custom headers on GET)
+      sessionId = (req.headers['mcp-session-id'] as string | undefined)?.trim()
+        || (req.query['mcp-session-id'] as string | undefined)?.trim()
+        || (req.query.sessionId as string | undefined)?.trim();
       if (!sessionId) {
+        logger.warn('GET /mcp 400: missing mcp-session-id', {
+          hasHeader: 'mcp-session-id' in (req.headers as Record<string, unknown>),
+          queryKeys: Object.keys(req.query),
+        });
         res.status(400).json({
           error: {
             code: ErrorCode.InvalidParams,
-            message: 'Invalid params: sessionId is required',
+            message: 'Invalid params: sessionId is required (header mcp-session-id or query mcp-session-id/sessionId)',
           },
         });
         return;
@@ -177,13 +185,20 @@ export function setupStreamableHttpRoutes(
         return;
       }
 
+      // SDK validateSession() only reads mcp-session-id from request headers. If we resolved
+      // sessionId from query (e.g. EventSource reconnect), ensure the header is set so the SDK
+      // does not reject with 400.
+      if (!req.headers['mcp-session-id']) {
+        req.headers['mcp-session-id'] = sessionId;
+      }
+
       // Set up disconnect detection for SSE stream (GET endpoint maintains persistent connection)
       setupDisconnectDetection(req, res, sessionId, serverManager);
 
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('Streamable HTTP GET error:', { error: errorMessage, sessionId: req.headers['mcp-session-id'] });
+      logger.error('Streamable HTTP GET error:', { error: errorMessage, sessionId });
       res.status(500).json({
         error: {
           code: ErrorCode.InternalError,
@@ -194,13 +209,20 @@ export function setupStreamableHttpRoutes(
   });
 
   router.delete(STREAMABLE_HTTP_ENDPOINT, ...middlewares, async (req: Request, res: Response) => {
+    let sessionId: string | undefined;
     try {
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      sessionId = (req.headers['mcp-session-id'] as string | undefined)?.trim()
+        || (req.query['mcp-session-id'] as string | undefined)?.trim()
+        || (req.query.sessionId as string | undefined)?.trim();
       if (!sessionId) {
+        logger.warn('DELETE /mcp 400: missing mcp-session-id', {
+          hasHeader: 'mcp-session-id' in (req.headers as Record<string, unknown>),
+          queryKeys: Object.keys(req.query),
+        });
         res.status(400).json({
           error: {
             code: ErrorCode.InvalidParams,
-            message: 'Invalid params: sessionId is required',
+            message: 'Invalid params: sessionId is required (header mcp-session-id or query mcp-session-id/sessionId)',
           },
         });
         return;
@@ -223,7 +245,7 @@ export function setupStreamableHttpRoutes(
       await sessionService.deleteSession(sessionId);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('Streamable HTTP DELETE error:', { error: errorMessage, sessionId: req.headers['mcp-session-id'] });
+      logger.error('Streamable HTTP DELETE error:', { error: errorMessage, sessionId });
       res.status(500).json({
         error: {
           code: ErrorCode.InternalError,

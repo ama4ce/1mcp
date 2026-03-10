@@ -189,6 +189,20 @@ export const serverOptions = {
     type: 'string' as const,
     default: undefined,
   },
+  // Tag-filter behaviour for HTTP (env: ONE_MCP_DEFAULT_TAG_FILTER → defaultTagFilter; middleware reads process.env)
+  defaultTagFilter: {
+    alias: 'default-tag-filter',
+    describe:
+      'Default tag-filter when URL has no filter (e.g. common,dev). Applied by HTTP middleware when no preset or tag-filter in query.',
+    type: 'string' as const,
+    default: undefined,
+  },
+  requireTagFilter: {
+    alias: 'require-tag-filter',
+    describe: 'When true, return 400 if URL has no tag-filter or preset (use with defaultTagFilter to allow connections)',
+    type: 'boolean' as const,
+    default: undefined,
+  },
 };
 
 /**

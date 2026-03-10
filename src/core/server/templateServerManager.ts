@@ -37,7 +37,7 @@ export class TemplateServerManager {
     // Initialize the client instance pool
     this.clientInstancePool = new ClientInstancePool({
       maxInstances: 50, // Configurable limit
-      idleTimeout: 5 * 60 * 1000, // 5 minutes - faster cleanup for development
+      idleTimeout: 30 * 60 * 1000, // 30 minutes - avoid closing idle sessions after 5 min (was 5 min)
       cleanupInterval: 30 * 1000, // 30 seconds - more frequent cleanup checks
     });
 
@@ -274,7 +274,7 @@ export class TemplateServerManager {
           logger.debug(`Client instance ${instanceId} has no more clients, marking as idle for cleanup after timeout`, {
             templateName,
             instanceId,
-            idleTimeout: 5 * 60 * 1000, // 5 minutes default
+            idleTimeout: 30 * 60 * 1000, // 30 minutes default (was 5 min - caused session reload)
           });
         } else {
           debugIf(() => ({

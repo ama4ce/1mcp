@@ -74,10 +74,10 @@ async function setupServer(configFilePath?: string, context?: ContextData): Prom
 
     if (asyncLoadingEnabled) {
       logger.info('Using async loading mode - HTTP server will start immediately, MCP servers load in background');
-      return setupServerAsync(transports, context);
+      return setupServerAsync(transports, mcpConfig, context);
     } else {
       logger.info('Using legacy synchronous loading mode - waiting for all MCP servers before starting HTTP server');
-      return setupServerSync(transports, context);
+      return setupServerSync(transports, mcpConfig, context);
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -92,6 +92,7 @@ async function setupServer(configFilePath?: string, context?: ContextData): Prom
  */
 async function setupServerAsync(
   transports: Record<string, AuthProviderTransport>,
+  mcpConfig: ReturnType<ConfigManager['getTransportConfig']>,
   _context?: ContextData,
 ): Promise<ServerSetupResult> {
   // Initialize instruction aggregator
@@ -102,6 +103,12 @@ async function setupServerAsync(
   const clientManager = ClientManager.getOrCreateInstance();
   clientManager.setInstructionAggregator(instructionAggregator);
   const clients = clientManager.initializeClientsAsync(transports);
+  for (const [name, conn] of clients.entries()) {
+    const serverConfig = mcpConfig[name];
+    if (serverConfig) {
+      conn.serverConfig = serverConfig;
+    }
+  }
   logger.info(`Initialized storage for ${Object.keys(transports).length} MCP servers`);
 
   // Create server manager with empty clients initially
@@ -150,6 +157,7 @@ async function setupServerAsync(
  */
 async function setupServerSync(
   transports: Record<string, AuthProviderTransport>,
+  mcpConfig: ReturnType<ConfigManager['getTransportConfig']>,
   _context?: ContextData,
 ): Promise<ServerSetupResult> {
   // Initialize instruction aggregator
@@ -160,6 +168,12 @@ async function setupServerSync(
   const clientManager = ClientManager.getOrCreateInstance();
   clientManager.setInstructionAggregator(instructionAggregator);
   const clients = await clientManager.createClients(transports);
+  for (const [name, conn] of clients.entries()) {
+    const serverConfig = mcpConfig[name];
+    if (serverConfig) {
+      conn.serverConfig = serverConfig;
+    }
+  }
   logger.info(`Connected to ${clients.size} MCP servers synchronously`);
 
   // Create server manager with connected clients

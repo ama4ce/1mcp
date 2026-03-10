@@ -30,10 +30,16 @@ import { InternalCapabilitiesProvider } from '@src/core/capabilities/internalCap
 import { byCapabilities } from '@src/core/filtering/clientFiltering.js';
 import { FilteringService } from '@src/core/filtering/filteringService.js';
 import { ServerManager } from '@src/core/server/serverManager.js';
-import { ClientStatus, InboundConnection, OutboundConnection, OutboundConnections } from '@src/core/types/index.js';
+import {
+  ClientStatus,
+  InboundConnection,
+  MCPServerParams,
+  OutboundConnection,
+  OutboundConnections,
+} from '@src/core/types/index.js';
 import { setLogLevel } from '@src/logger/logger.js';
 import logger from '@src/logger/logger.js';
-import { withErrorHandling } from '@src/utils/core/errorHandling.js';
+import { isMethodNotFoundError, withErrorHandling } from '@src/utils/core/errorHandling.js';
 import { buildUri, parseUri } from '@src/utils/core/parsing.js';
 import { getRequestTimeout } from '@src/utils/core/timeoutUtils.js';
 import { handlePagination } from '@src/utils/ui/pagination.js';
@@ -45,6 +51,65 @@ import { handlePagination } from '@src/utils/ui/pagination.js';
  */
 function getRequestSession(inboundConn: InboundConnection): string | undefined {
   return inboundConn.context?.sessionId;
+}
+
+function getEnabledList(config: MCPServerParams | undefined, itemType: 'tool' | 'resource' | 'prompt') {
+  if (!config) {
+    return undefined;
+  }
+  switch (itemType) {
+    case 'tool':
+      return config.enabledTools;
+    case 'resource':
+      return config.enabledResources;
+    case 'prompt':
+      return config.enabledPrompts;
+  }
+}
+
+function getDisabledList(config: MCPServerParams | undefined, itemType: 'tool' | 'resource' | 'prompt'): string[] {
+  if (!config) {
+    return [];
+  }
+  switch (itemType) {
+    case 'tool':
+      return config.disabledTools ?? [];
+    case 'resource':
+      return config.disabledResources ?? [];
+    case 'prompt':
+      return config.disabledPrompts ?? [];
+  }
+}
+
+function isItemAllowed(
+  itemId: string,
+  config: MCPServerParams | undefined,
+  itemType: 'tool' | 'resource' | 'prompt',
+): boolean {
+  if (!config) {
+    return true;
+  }
+  const enabled = getEnabledList(config, itemType);
+  if (enabled && enabled.length > 0) {
+    return enabled.includes(itemId);
+  }
+  const disabled = getDisabledList(config, itemType);
+  return !disabled.includes(itemId);
+}
+
+function filterItems<T extends { name: string } | { uri: string }>(
+  items: T[],
+  config: MCPServerParams | undefined,
+  itemType: 'tool' | 'resource' | 'prompt',
+  itemKey: 'name' | 'uri',
+): T[] {
+  if (!config) {
+    return items;
+  }
+  return items.filter((item) => {
+    const itemId = itemKey === 'name' ? (item as { name: string }).name : (item as { uri: string }).uri;
+    return isItemAllowed(itemId, config, itemType);
+  });
 }
 
 /**
@@ -304,11 +369,21 @@ function registerResourceHandlers(outboundConns: OutboundConnections, inboundCon
         filteredClients,
         request.params || {},
         (client, params, opts) => client.listResources(params as ListResourcesRequest['params'], opts),
-        (outboundConn, result) =>
-          result.resources?.map((resource) => ({
+        (outboundConn, result) => {
+          const resources = result.resources ?? [];
+          const filtered = filterItems(resources, outboundConn.serverConfig, 'resource', 'uri');
+          if (filtered.length !== resources.length) {
+            logger.debug(`Filtered resources from ${outboundConn.name}`, {
+              serverName: outboundConn.name,
+              filteredCount: resources.length - filtered.length,
+              remainingCount: filtered.length,
+            });
+          }
+          return filtered.map((resource) => ({
             ...resource,
             uri: buildUri(outboundConn.name, resource.uri, MCP_URI_SEPARATOR),
-          })) ?? [],
+          }));
+        },
         inboundConn.enablePagination ?? false,
       );
 
@@ -378,6 +453,8 @@ function registerResourceHandlers(outboundConns: OutboundConnections, inboundCon
   );
 
   // Subscribe Resource handler
+  // When a server returns "Method not found" (-32601) for subscribe, treat as no-op and return {}
+  // so the client does not treat the session as broken and reload tools.
   inboundConn.server.setRequestHandler(
     SubscribeRequestSchema,
     withErrorHandling(async (request) => {
@@ -386,16 +463,31 @@ function registerResourceHandlers(outboundConns: OutboundConnections, inboundCon
       if (!outboundConn) {
         throw new Error(`Unknown client: ${clientName}`);
       }
-      return outboundConn.client.subscribeResource(
-        { ...request.params, uri: resourceName },
-        {
-          timeout: getRequestTimeout(outboundConn.transport),
-        },
-      );
+      if (!isItemAllowed(resourceName, outboundConn.serverConfig, 'resource')) {
+        throw new Error(`Resource '${resourceName}' is disabled by configuration for server '${clientName}'.`);
+      }
+      try {
+        return await outboundConn.client.subscribeResource(
+          { ...request.params, uri: resourceName },
+          {
+            timeout: getRequestTimeout(outboundConn.transport),
+          },
+        );
+      } catch (error) {
+        if (isMethodNotFoundError(error)) {
+          logger.debug('Server does not support resource subscription, treating as no-op', {
+            serverName: clientName,
+            resourceUri: resourceName,
+          });
+          return {};
+        }
+        throw error;
+      }
     }, 'Error subscribing to resource'),
   );
 
   // Unsubscribe Resource handler
+  // When a server returns "Method not found" (-32601) for unsubscribe, treat as no-op and return {}.
   inboundConn.server.setRequestHandler(
     UnsubscribeRequestSchema,
     withErrorHandling(async (request) => {
@@ -404,12 +496,26 @@ function registerResourceHandlers(outboundConns: OutboundConnections, inboundCon
       if (!outboundConn) {
         throw new Error(`Unknown client: ${clientName}`);
       }
-      return outboundConn.client.unsubscribeResource(
-        { ...request.params, uri: resourceName },
-        {
-          timeout: getRequestTimeout(outboundConn.transport),
-        },
-      );
+      if (!isItemAllowed(resourceName, outboundConn.serverConfig, 'resource')) {
+        throw new Error(`Resource '${resourceName}' is disabled by configuration for server '${clientName}'.`);
+      }
+      try {
+        return await outboundConn.client.unsubscribeResource(
+          { ...request.params, uri: resourceName },
+          {
+            timeout: getRequestTimeout(outboundConn.transport),
+          },
+        );
+      } catch (error) {
+        if (isMethodNotFoundError(error)) {
+          logger.debug('Server does not support resource unsubscription, treating as no-op', {
+            serverName: clientName,
+            resourceUri: resourceName,
+          });
+          return {};
+        }
+        throw error;
+      }
     }, 'Error unsubscribing from resource'),
   );
 
@@ -421,6 +527,9 @@ function registerResourceHandlers(outboundConns: OutboundConnections, inboundCon
       const outboundConn = resolveOutboundConnection(clientName, sessionId, outboundConns);
       if (!outboundConn) {
         throw new Error(`Unknown client: ${clientName}`);
+      }
+      if (!isItemAllowed(resourceName, outboundConn.serverConfig, 'resource')) {
+        throw new Error(`Resource '${resourceName}' is disabled by configuration for server '${clientName}'.`);
       }
       const resource = await outboundConn.client.readResource(
         { ...request.params, uri: resourceName },
@@ -466,11 +575,30 @@ function registerToolHandlers(outboundConns: OutboundConnections, inboundConn: I
         filteredClients,
         request.params || {},
         (client, params, opts) => client.listTools(params as ListToolsRequest['params'], opts),
-        (outboundConn, result) =>
-          result.tools?.map((tool) => ({
+        (outboundConn, result) => {
+          const tools = result.tools ?? [];
+          if (outboundConn.serverConfig) {
+            logger.debug(`Tool filtering config for ${outboundConn.name}`, {
+              serverName: outboundConn.name,
+              enabledToolsCount: outboundConn.serverConfig.enabledTools?.length ?? 0,
+              disabledToolsCount: outboundConn.serverConfig.disabledTools?.length ?? 0,
+            });
+          } else {
+            logger.debug(`Tool filtering config missing for ${outboundConn.name}`);
+          }
+          const filtered = filterItems(tools, outboundConn.serverConfig, 'tool', 'name');
+          if (filtered.length !== tools.length) {
+            logger.debug(`Filtered tools from ${outboundConn.name}`, {
+              serverName: outboundConn.name,
+              filteredCount: tools.length - filtered.length,
+              remainingCount: filtered.length,
+            });
+          }
+          return filtered.map((tool) => ({
             ...tool,
             name: buildUri(outboundConn.name, tool.name, MCP_URI_SEPARATOR),
-          })) ?? [],
+          }));
+        },
         inboundConn.enablePagination ?? false,
       );
 
@@ -525,6 +653,9 @@ function registerToolHandlers(outboundConns: OutboundConnections, inboundConn: I
       if (!outboundConn) {
         throw new Error(`Unknown client: ${clientName}`);
       }
+      if (!isItemAllowed(toolName, outboundConn.serverConfig, 'tool')) {
+        throw new Error(`Tool '${toolName}' is disabled by configuration for server '${clientName}'.`);
+      }
       return outboundConn.client.callTool({ ...request.params, name: toolName }, CallToolResultSchema, {
         timeout: getRequestTimeout(outboundConn.transport),
       });
@@ -554,11 +685,21 @@ function registerPromptHandlers(outboundConns: OutboundConnections, inboundConn:
         filteredClients,
         request.params || {},
         (client, params, opts) => client.listPrompts(params as ListPromptsRequest['params'], opts),
-        (outboundConn, result) =>
-          result.prompts?.map((prompt) => ({
+        (outboundConn, result) => {
+          const prompts = result.prompts ?? [];
+          const filtered = filterItems(prompts, outboundConn.serverConfig, 'prompt', 'name');
+          if (filtered.length !== prompts.length) {
+            logger.debug(`Filtered prompts from ${outboundConn.name}`, {
+              serverName: outboundConn.name,
+              filteredCount: prompts.length - filtered.length,
+              remainingCount: filtered.length,
+            });
+          }
+          return filtered.map((prompt) => ({
             ...prompt,
             name: buildUri(outboundConn.name, prompt.name, MCP_URI_SEPARATOR),
-          })) ?? [],
+          }));
+        },
         inboundConn.enablePagination ?? false,
       );
 
@@ -577,6 +718,9 @@ function registerPromptHandlers(outboundConns: OutboundConnections, inboundConn:
       const outboundConn = resolveOutboundConnection(clientName, sessionId, outboundConns);
       if (!outboundConn) {
         throw new Error(`Unknown client: ${clientName}`);
+      }
+      if (!isItemAllowed(promptName, outboundConn.serverConfig, 'prompt')) {
+        throw new Error(`Prompt '${promptName}' is disabled by configuration for server '${clientName}'.`);
       }
       return outboundConn.client.getPrompt({ ...request.params, name: promptName });
     }, 'Error getting prompt'),

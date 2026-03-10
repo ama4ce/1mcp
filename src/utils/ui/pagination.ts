@@ -4,6 +4,7 @@ import { Prompt, Resource, ResourceTemplate, Tool } from '@modelcontextprotocol/
 
 import { ClientStatus, OutboundConnection, OutboundConnections } from '@src/core/types/index.js';
 import logger from '@src/logger/logger.js';
+import { isMethodNotFoundError } from '@src/utils/core/errorHandling.js';
 import { getRequestTimeout } from '@src/utils/core/timeoutUtils.js';
 
 interface PaginationParams {
@@ -152,6 +153,14 @@ async function fetchAllItemsForClient<T>(
 
     return items;
   } catch (error) {
+    // Client declares capability but does not implement this method (e.g. resources without list_templates)
+    if (isMethodNotFoundError(error)) {
+      logger.debug(`Client ${outboundConn.name} does not support this method, skipping`, {
+        clientName: outboundConn.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.warn(`Failed to fetch items from client ${outboundConn.name}: ${errorMessage}`, {
       clientName: outboundConn.name,

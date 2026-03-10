@@ -27,7 +27,7 @@ export interface ClientPoolOptions {
  */
 const DEFAULT_POOL_OPTIONS: ClientPoolOptions = {
   maxInstances: 10,
-  idleTimeout: 5 * 60 * 1000, // 5 minutes
+  idleTimeout: 30 * 60 * 1000, // 30 minutes (was 5 min - caused session reload in agents)
   cleanupInterval: 60 * 1000, // 1 minute
   maxTotalInstances: 100,
 };

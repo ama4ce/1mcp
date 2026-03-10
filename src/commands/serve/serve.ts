@@ -60,6 +60,8 @@ export interface ServeOptions {
   'enable-internal-tools': boolean;
   'internal-tools'?: string;
   'instructions-template'?: string;
+  defaultTagFilter?: string;
+  requireTagFilter?: boolean;
 }
 
 /**

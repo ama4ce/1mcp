@@ -7,6 +7,7 @@ import {
   getErrorCause,
   getErrorCode,
   getErrorMessage,
+  isMethodNotFoundError,
   isMCPError,
   normalizeError,
   withErrorHandling,
@@ -160,11 +161,39 @@ describe('getErrorCode', () => {
     expect(getErrorCode(mcpError)).toBe(ErrorCode.InvalidRequest);
   });
 
+  it('should return code from error-like object with code property', () => {
+    const err = { code: -32601, message: 'Method not found' };
+    expect(getErrorCode(err)).toBe(-32601);
+  });
+
   it('should return InternalError for non-MCP errors', () => {
     const regularError = new Error('Regular error');
     expect(getErrorCode(regularError)).toBe(ErrorCode.InternalError);
     expect(getErrorCode('string error')).toBe(ErrorCode.InternalError);
     expect(getErrorCode(null)).toBe(ErrorCode.InternalError);
+  });
+});
+
+describe('isMethodNotFoundError', () => {
+  it('should return true for MCPError with MethodNotFound code', () => {
+    const mcpError = new MCPError('Not found', ErrorCode.MethodNotFound);
+    expect(isMethodNotFoundError(mcpError)).toBe(true);
+  });
+
+  it('should return true for error-like object with code -32601', () => {
+    expect(isMethodNotFoundError({ code: -32601 })).toBe(true);
+    expect(isMethodNotFoundError({ code: ErrorCode.MethodNotFound })).toBe(true);
+  });
+
+  it('should return true for Error with "Method not found" in message', () => {
+    expect(isMethodNotFoundError(new Error('MCP error -32601: Method not found'))).toBe(true);
+  });
+
+  it('should return false for other errors', () => {
+    expect(isMethodNotFoundError(new MCPError('Other', ErrorCode.InternalError))).toBe(false);
+    expect(isMethodNotFoundError(new Error('Other error'))).toBe(false);
+    expect(isMethodNotFoundError({ code: -32600 })).toBe(false);
+    expect(isMethodNotFoundError(null)).toBe(false);
   });
 });
 

@@ -13,11 +13,11 @@ export function createHealthRoutes(loadingManager?: McpLoadingManager): Router {
   const router: Router = Router();
   const healthService = HealthService.getInstance();
 
-  // Rate limiter for health endpoints - more permissive than OAuth endpoints
+  // Rate limiter for health endpoints - permissive so agents/proxies polling don't get 429 and drop session
   const createHealthLimiter = () => {
     return rateLimit({
       windowMs: 5 * 60 * 1000, // 5 minutes
-      max: 200, // max requests per window per IP (higher limit for monitoring)
+      max: 2000, // max requests per window per IP (avoid "no health" → session reload after 5 min)
       standardHeaders: true,
       legacyHeaders: false,
       message: {

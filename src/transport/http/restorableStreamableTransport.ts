@@ -128,17 +128,18 @@ export class RestorableStreamableHTTPServerTransport extends StreamableHTTPServe
    */
   markAsInitialized(): OperationResult {
     try {
-      // Use type-safe interface to access internal SDK properties
-      // MCP SDK private property _initialized is not exposed in public types
+      // Use type-safe interface to access internal SDK properties.
+      // GET requests are handled by _webStandardTransport.handleGetRequest -> validateSession(),
+      // which checks _initialized on the web standard transport. We must set it there too.
       const internalTransport = this as unknown as InternalStreamableTransport;
+      const webTransport = internalTransport._webStandardTransport;
 
-      // Accessing private SDK property for session restoration functionality
       if (internalTransport._initialized !== undefined) {
-        // Setting private SDK property to mark session as initialized for restoration
         internalTransport._initialized = true;
       }
-      // Note: If _initialized is undefined, we still mark as restored since the SDK may have changed
-      // This provides graceful degradation while allowing session restoration to proceed
+      if (webTransport && webTransport._initialized !== undefined) {
+        webTransport._initialized = true;
+      }
 
       this._isRestored = true;
       logger.debug('Transport marked as initialized for restored session');

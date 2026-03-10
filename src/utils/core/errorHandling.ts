@@ -72,7 +72,27 @@ export function getErrorCode(error: unknown): number {
   if (error instanceof MCPError) {
     return error.code;
   }
+  if (error && typeof error === 'object' && 'code' in error && Number.isSafeInteger((error as { code: number }).code)) {
+    return (error as { code: number }).code;
+  }
   return ErrorCode.InternalError;
+}
+
+/**
+ * Returns true if the error is JSON-RPC "Method not found" (-32601).
+ * Used to treat missing resource subscribe/unsubscribe support as a no-op
+ * so the client does not treat the session as broken and reload tools.
+ * @param error The error to check
+ * @returns True if the error indicates the method is not supported
+ */
+export function isMethodNotFoundError(error: unknown): boolean {
+  if (getErrorCode(error) === ErrorCode.MethodNotFound) {
+    return true;
+  }
+  if (error instanceof Error && error.message.includes('Method not found')) {
+    return true;
+  }
+  return false;
 }
 
 /**

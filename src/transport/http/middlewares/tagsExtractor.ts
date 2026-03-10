@@ -272,7 +272,46 @@ export default function tagsExtractor(req: Request, res: Response, next: NextFun
     return;
   }
 
-  // No filtering
+  // No filtering: optionally require tag-filter or apply default
+  const requireTagFilter = process.env.ONE_MCP_REQUIRE_TAG_FILTER === 'true' || process.env.ONE_MCP_REQUIRE_TAG_FILTER === '1';
+  const defaultTagFilter = process.env.ONE_MCP_DEFAULT_TAG_FILTER?.trim();
+
+  if (requireTagFilter && !defaultTagFilter) {
+    res.status(400).json({
+      error: {
+        code: ErrorCode.InvalidParams,
+        message:
+          'Tag filter is required. Provide "tag-filter" (e.g. tag-filter=common,dev) or "preset" in the URL.',
+        examples: [
+          'tag-filter=common,cursor,dev',
+          'tag-filter=common,cursor,leadership',
+          'preset=your-preset-name',
+        ],
+      },
+    });
+    return;
+  }
+
+  if (defaultTagFilter) {
+    try {
+      const expression = TagQueryParser.parseAdvanced(defaultTagFilter);
+      res.locals.tagExpression = expression;
+      res.locals.tagFilterMode = 'advanced';
+      res.locals.tags = expression.type === 'tag' ? [expression.value!] : undefined;
+      next();
+      return;
+    } catch (error) {
+      logger.error('ONE_MCP_DEFAULT_TAG_FILTER parse failed', { defaultTagFilter, error });
+      res.status(500).json({
+        error: {
+          code: ErrorCode.InternalError,
+          message: 'Server default tag-filter configuration is invalid',
+        },
+      });
+      return;
+    }
+  }
+
   res.locals.tags = undefined;
   res.locals.tagExpression = undefined;
   res.locals.tagFilterMode = 'none';

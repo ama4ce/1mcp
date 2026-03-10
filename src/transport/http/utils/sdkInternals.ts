@@ -5,10 +5,11 @@
 
 /**
  * Interface representing the internal structure of the web standard transport
- * used within StreamableHTTPServerTransport
+ * used within StreamableHTTPServerTransport (has its own _initialized used by validateSession).
  */
 export interface InternalWebStandardTransport {
   sessionId: string;
+  _initialized?: boolean;
 }
 
 /**
