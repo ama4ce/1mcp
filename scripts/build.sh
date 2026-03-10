@@ -1,30 +1,31 @@
 #!/bin/sh
 
 # Build script for 1MCP Agent
-# This script handles the complex build command logic
+# This script handles the build command logic in local and git-dependency installs.
 
 set -e
 
 echo "🔨 Building 1MCP Agent..."
 
-run_exec() {
-  if command -v npm >/dev/null 2>&1; then
-    npm exec -- "$@"
-  elif command -v pnpm >/dev/null 2>&1; then
-    pnpm exec "$@"
-  else
-    echo "Neither npm nor pnpm is available" >&2
-    exit 1
-  fi
-}
+if [ ! -x "./node_modules/.bin/tsc" ]; then
+  echo "❌ Missing TypeScript compiler (./node_modules/.bin/tsc)." >&2
+  echo "Install dependencies first (npm ci / npm install)." >&2
+  exit 1
+fi
+
+if [ ! -x "./node_modules/.bin/tsc-alias" ]; then
+  echo "❌ Missing tsc-alias binary (./node_modules/.bin/tsc-alias)." >&2
+  echo "Install dependencies first (npm ci / npm install)." >&2
+  exit 1
+fi
 
 # Compile TypeScript
 echo "📦 Compiling TypeScript..."
-run_exec tsc --project tsconfig.build.json
+./node_modules/.bin/tsc --project tsconfig.build.json
 
 # Resolve path aliases
 echo "🔗 Resolving path aliases..."
-run_exec tsc-alias -p tsconfig.build.json
+./node_modules/.bin/tsc-alias -p tsconfig.build.json
 
 # Make the built file executable
 echo "🔧 Making build/index.js executable..."
