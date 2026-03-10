@@ -13,7 +13,9 @@ ensure_build_tools() {
   fi
 
   echo "⚙️  Build tools are missing, installing local dev dependencies..."
-  npm install --include=dev --ignore-scripts --no-audit --no-fund --silent
+  # Git dependencies installed via `npm i -g git+...` inherit global mode.
+  # Force local install so we install dev deps into this temp clone, not global prefix.
+  npm_config_global=false npm install --global=false --include=dev --ignore-scripts --no-audit --no-fund --silent
 
   if [ ! -x "./node_modules/.bin/tsc" ] || [ ! -x "./node_modules/.bin/tsc-alias" ]; then
     echo "❌ Missing build tools after dependency install (tsc / tsc-alias)." >&2

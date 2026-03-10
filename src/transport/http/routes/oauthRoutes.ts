@@ -108,7 +108,7 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
    */
   const authorizeHandler: RequestHandler = async (req: Request, res: Response) => {
     try {
-      const { serverName } = req.params;
+      const serverName = String(req.params.serverName);
       const serverManager = ServerManager.current;
 
       const clientInfo = serverManager.getClient(serverName);
@@ -152,7 +152,7 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
    * Handle OAuth callback and trigger reconnection
    */
   router.get('/callback/:serverName', async (req: Request, res: Response) => {
-    const { serverName } = req.params;
+    const serverName = String(req.params.serverName);
     const { code, error } = req.query;
     try {
       if (error) {
@@ -192,7 +192,7 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
    * Restart OAuth flow for a service
    */
   const restartHandler: RequestHandler = async (req: Request, res: Response) => {
-    const { serverName } = req.params;
+    const serverName = String(req.params.serverName);
     try {
       const serverManager = ServerManager.current;
 

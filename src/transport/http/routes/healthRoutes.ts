@@ -264,7 +264,7 @@ export function createHealthRoutes(loadingManager?: McpLoadingManager): Router {
         return;
       }
 
-      const serverName = req.params.serverName;
+      const serverName = String(req.params.serverName);
       const serverInfo = loadingManager.getStateTracker().getServerState(serverName);
 
       if (!serverInfo) {
