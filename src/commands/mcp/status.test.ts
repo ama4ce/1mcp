@@ -1,6 +1,6 @@
 import printer from '@src/utils/ui/printer.js';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { buildStatusCommand, statusCommand, getFilteringSummary } from './status.js';
 
@@ -191,7 +191,7 @@ describe('Status Command', () => {
       };
 
       const { getServer } = await import('./utils/mcpServerConfig.js');
-      (getServer as vi.Mock).mockReturnValue(mockServers['github']);
+      (getServer as Mock).mockReturnValue(mockServers['github']);
 
       const args = {
         name: 'github',
@@ -218,7 +218,7 @@ describe('Status Command', () => {
       };
 
       const { getServer } = await import('./utils/mcpServerConfig.js');
-      (getServer as vi.Mock).mockReturnValue(mockServers['postgres']);
+      (getServer as Mock).mockReturnValue(mockServers['postgres']);
 
       const args = {
         name: 'postgres',
@@ -243,7 +243,7 @@ describe('Status Command', () => {
       };
 
       const { getServer } = await import('./utils/mcpServerConfig.js');
-      (getServer as vi.Mock).mockReturnValue(mockServers['filesystem']);
+      (getServer as Mock).mockReturnValue(mockServers['filesystem']);
 
       const args = {
         name: 'filesystem',
@@ -273,7 +273,7 @@ describe('Status Command', () => {
       };
 
       const { getServer } = await import('./utils/mcpServerConfig.js');
-      (getServer as vi.Mock).mockReturnValue(mockServers['multi-filtered']);
+      (getServer as Mock).mockReturnValue(mockServers['multi-filtered']);
 
       const args = {
         name: 'multi-filtered',
@@ -293,7 +293,7 @@ describe('Status Command', () => {
 
     it('should handle server not found error', async () => {
       const { getServer } = await import('./utils/mcpServerConfig.js');
-      (getServer as vi.Mock).mockReturnValue(undefined);
+      (getServer as Mock).mockReturnValue(undefined);
 
       // Mock process.exit to prevent test from exiting
       const exitMock = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
