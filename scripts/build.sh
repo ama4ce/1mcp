@@ -8,10 +8,13 @@ set -e
 echo "🔨 Building 1MCP Agent..."
 
 run_exec() {
-  if command -v pnpm >/dev/null 2>&1; then
+  if command -v npm >/dev/null 2>&1; then
+    npm exec -- "$@"
+  elif command -v pnpm >/dev/null 2>&1; then
     pnpm exec "$@"
   else
-    npm exec -- "$@"
+    echo "Neither npm nor pnpm is available" >&2
+    exit 1
   fi
 }
 
