@@ -59,7 +59,7 @@
     "build": "./scripts/build.sh",
     "clean": "rm -rf build",
     "clean:sea": "rm -f 1mcp 1mcp.exe sea-prep.blob build/bundled.cjs",
-    "prepare": "husky || true",
+    "prepare": "npm run build && husky || true",
     "watch": "tsc --watch --project tsconfig.build.json",
     "inspector": "npx -y @modelcontextprotocol/inspector",
     "lint": "eslint . --ext .ts",
