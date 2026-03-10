@@ -14,6 +14,22 @@ A unified Model Context Protocol server implementation that aggregates multiple 
 
 1MCP (One MCP) is designed to simplify the way you work with AI assistants. Instead of configuring multiple MCP servers for different clients (Claude Desktop, Cherry Studio, Cursor, Roo Code, Claude, etc.), 1MCP provides a single, unified server.
 
+## Fork Notice
+
+This repository is a custom fork of 1MCP.
+
+- Fork: https://github.com/ama4ce/1mcp
+- Original upstream: https://github.com/1mcp-app/agent
+
+### Fork-specific changes
+
+Compared to upstream, this fork currently includes:
+
+- Fine-grained capability filtering with `enabledTools` support (whitelist behavior) and explicit precedence over blocklists.
+- Extended `mcp status` output to show capability-filtering configuration and enabled-tools summary.
+- Streamable transport and request-handling updates required by the filtering flow.
+- Related test updates for capability aggregation, status output, and error-handling paths.
+
 ## Features
 
 - **🔄 Unified Interface**: Aggregates multiple MCP servers into one
