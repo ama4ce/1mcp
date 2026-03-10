@@ -7,13 +7,21 @@ set -e
 
 echo "🔨 Building 1MCP Agent..."
 
+run_exec() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm exec "$@"
+  else
+    npm exec -- "$@"
+  fi
+}
+
 # Compile TypeScript
 echo "📦 Compiling TypeScript..."
-pnpm exec tsc --project tsconfig.build.json
+run_exec tsc --project tsconfig.build.json
 
 # Resolve path aliases
 echo "🔗 Resolving path aliases..."
-pnpm exec tsc-alias -p tsconfig.build.json
+run_exec tsc-alias -p tsconfig.build.json
 
 # Make the built file executable
 echo "🔧 Making build/index.js executable..."
