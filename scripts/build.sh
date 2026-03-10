@@ -7,17 +7,21 @@ set -e
 
 echo "🔨 Building 1MCP Agent..."
 
-if [ ! -x "./node_modules/.bin/tsc" ]; then
-  echo "❌ Missing TypeScript compiler (./node_modules/.bin/tsc)." >&2
-  echo "Install dependencies first (npm ci / npm install)." >&2
-  exit 1
-fi
+ensure_build_tools() {
+  if [ -x "./node_modules/.bin/tsc" ] && [ -x "./node_modules/.bin/tsc-alias" ]; then
+    return 0
+  fi
 
-if [ ! -x "./node_modules/.bin/tsc-alias" ]; then
-  echo "❌ Missing tsc-alias binary (./node_modules/.bin/tsc-alias)." >&2
-  echo "Install dependencies first (npm ci / npm install)." >&2
-  exit 1
-fi
+  echo "⚙️  Build tools are missing, installing local dev dependencies..."
+  npm install --include=dev --ignore-scripts --no-audit --no-fund --silent
+
+  if [ ! -x "./node_modules/.bin/tsc" ] || [ ! -x "./node_modules/.bin/tsc-alias" ]; then
+    echo "❌ Missing build tools after dependency install (tsc / tsc-alias)." >&2
+    exit 1
+  fi
+}
+
+ensure_build_tools
 
 # Compile TypeScript
 echo "📦 Compiling TypeScript..."
