@@ -1,4 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { DEFAULT_MAX_CONCURRENT_LOADS } from '@src/constants/mcp.js';
 import { InstructionAggregator } from '@src/core/instructions/instructionAggregator.js';
@@ -28,6 +30,13 @@ export class ClientManager {
   private outboundConns: OutboundConnections = new Map();
   private transports: Record<string, AuthProviderTransport> = {};
   private connectionSemaphore: Map<string, Promise<void>> = new Map();
+  /**
+   * Periodic `ping` timers for remote HTTP/SSE clients. Keeps long-lived
+   * SSE streams alive across proxy/edge idle timeouts (e.g. Cloudflare in
+   * front of mcp.notion.com cuts idle SSE after ~5 min). One entry per
+   * connected server; cleared in onclose. stdio transports are exempt.
+   */
+  private pingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
   private instructionAggregator?: InstructionAggregator;
   private clientFactory: ClientFactory;
   private connectionHandler: ConnectionHandler;
@@ -98,12 +107,64 @@ export class ClientManager {
         clientInfo.status = ClientStatus.Disconnected;
       }
       this.instructionAggregator?.removeServer(name);
+      this.stopKeepalivePing(name);
       logger.info(`Client ${name} disconnected`);
     };
 
     client.onerror = (error) => {
       logger.error(`Client ${name} error: ${error}`);
     };
+
+    this.startKeepalivePing(name, client);
+  }
+
+  /**
+   * Send periodic `ping` to remote HTTP/SSE servers to keep the underlying
+   * connection alive across proxy/edge idle timeouts. Skipped for stdio
+   * transports (local child processes don't need it). Disabled when the
+   * configured interval is 0 or negative.
+   */
+  private startKeepalivePing(name: string, client: Client): void {
+    const transport = this.outboundConns.get(name)?.transport ?? this.transports[name];
+    const isRemoteHttp = transport instanceof StreamableHTTPClientTransport || transport instanceof SSEClientTransport;
+    if (!isRemoteHttp) {
+      return;
+    }
+
+    const rawInterval = process.env.ONE_MCP_REMOTE_PING_INTERVAL_MS;
+    const intervalMs = Number.isFinite(Number(rawInterval)) ? Number(rawInterval) : 60_000;
+    if (intervalMs <= 0) {
+      return;
+    }
+
+    this.stopKeepalivePing(name);
+
+    const handle = setInterval(async () => {
+      try {
+        await client.ping();
+      } catch (error) {
+        logger.warn(`Keepalive ping failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, intervalMs);
+
+    if (typeof handle.unref === 'function') {
+      handle.unref();
+    }
+
+    this.pingIntervals.set(name, handle);
+    debugIf(() => ({
+      message: `Keepalive ping started for ${name}`,
+      meta: { intervalMs },
+    }));
+  }
+
+  private stopKeepalivePing(name: string): void {
+    const handle = this.pingIntervals.get(name);
+    if (!handle) {
+      return;
+    }
+    clearInterval(handle);
+    this.pingIntervals.delete(name);
   }
 
   /**
