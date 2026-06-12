@@ -262,14 +262,42 @@ export class FileStorageService {
   }
 
   /**
-   * Writes data to a file with the specified prefix and ID
+   * Writes data to a file with the specified prefix and ID.
+   *
+   * Uses an atomic write pattern (tmp file + fsync + rename) so a crash or
+   * SIGKILL mid-write cannot leave the target file partially written or
+   * empty. Critical for OAuth token files: an interrupted write would leave
+   * an obsolete refresh_token on disk after Notion-style rotation has
+   * already invalidated it server-side ("Invalid refresh token" on next
+   * boot).
    */
   writeData<T extends ExpirableData>(filePrefix: string, id: string, data: T): void {
+    const filePath = this.getFilePath(filePrefix, id);
+    const payload = JSON.stringify(data, null, 2);
+    const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+
+    let fd: number | undefined;
     try {
-      const filePath = this.getFilePath(filePrefix, id);
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+      fd = fs.openSync(tmpPath, 'w', 0o600);
+      fs.writeSync(fd, payload);
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = undefined;
+      fs.renameSync(tmpPath, filePath);
       logger.debug(`Wrote data to ${filePath}`);
     } catch (error) {
+      if (fd !== undefined) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // ignore secondary close errors
+        }
+      }
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // tmp may not exist; ignore
+      }
       logger.error(`Failed to write data for ${id}: ${error}`);
       throw error;
     }

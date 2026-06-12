@@ -337,6 +337,22 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
     }
 
     try {
+      // The transport from the existing connection may already be in the
+      // started state (e.g. user clicked "Restart OAuth" while the previous
+      // client is still alive). Calling connect() on an already-started
+      // StreamableHTTPClientTransport throws:
+      //   "StreamableHTTPClientTransport already started!"
+      // which leaves the server stuck in Error and silently breaks the
+      // restart-OAuth button. Close it first; ignore close errors since the
+      // transport may be in any intermediate state.
+      try {
+        await clientInfo.transport.close();
+      } catch (closeError) {
+        logger.debug(
+          `Pre-close before OAuth restart failed for ${serverName}: ${closeError instanceof Error ? closeError.message : String(closeError)}`,
+        );
+      }
+
       // Create new client and attempt connection to trigger OAuth
       const clientManager = ClientManager.getOrCreateInstance();
       const newClient = clientManager.createClientInstance();

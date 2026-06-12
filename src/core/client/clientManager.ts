@@ -139,13 +139,25 @@ export class ClientManager {
 
     this.stopKeepalivePing(name);
 
-    const handle = setInterval(async () => {
+    const sendPing = async (): Promise<void> => {
       try {
         await client.ping();
       } catch (error) {
         logger.warn(`Keepalive ping failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    }, intervalMs);
+    };
+
+    // Fire one ping immediately after connect. Reasons:
+    // - Exercises stored OAuth tokens early; if access_token is near expiry
+    //   (e.g. pod was idle longer than access_token TTL), MCP SDK refreshes
+    //   via refresh_token here and saves the rotated tokens to disk before
+    //   any external user request races with rotation.
+    // - Validates that the loaded session is actually live; a stale
+    //   refresh_token surfaces as a warn-level reconnect signal here rather
+    //   than as a silent failure on the first real call.
+    void sendPing();
+
+    const handle = setInterval(sendPing, intervalMs);
 
     if (typeof handle.unref === 'function') {
       handle.unref();
@@ -154,7 +166,7 @@ export class ClientManager {
     this.pingIntervals.set(name, handle);
     debugIf(() => ({
       message: `Keepalive ping started for ${name}`,
-      meta: { intervalMs },
+      meta: { intervalMs, firedImmediately: true },
     }));
   }
 
