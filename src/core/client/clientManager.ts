@@ -415,6 +415,24 @@ export class ClientManager {
     return Object.keys(this.transports);
   }
 
+  /**
+   * Swap the transport instance stored for a server. Used during the
+   * Restart-OAuth flow where the old transport's `_abortController` is left
+   * in an aborted-but-truthy state by the SDK's close(), so the next start()
+   * throws "already started!". Callers should pass a freshly built transport
+   * (e.g. via TransportRecreator.recreateHttpTransport) so subsequent
+   * connect() and completeOAuthAndReconnect() calls operate on the new
+   * instance. Also propagates the swap into the live OutboundConnection
+   * entry so observers reading clientInfo.transport see the new one.
+   */
+  public replaceTransport(serverName: string, transport: AuthProviderTransport): void {
+    this.transports[serverName] = transport;
+    const clientInfo = this.outboundConns.get(serverName);
+    if (clientInfo) {
+      clientInfo.transport = transport;
+    }
+  }
+
   public async completeOAuthAndReconnect(serverName: string, authorizationCode: string): Promise<void> {
     const clientInfo = this.outboundConns.get(serverName);
     if (!clientInfo) {

@@ -1,6 +1,7 @@
 import { SDKOAuthServerProvider } from '@src/auth/sdkOAuthServerProvider.js';
 import { AUTH_CONFIG, RATE_LIMIT_CONFIG } from '@src/constants.js';
 import { ClientManager, OAuthRequiredError } from '@src/core/client/clientManager.js';
+import { TransportRecreator } from '@src/core/client/transportRecreator.js';
 import { LoadingState } from '@src/core/loading/loadingStateTracker.js';
 import { McpLoadingManager } from '@src/core/loading/mcpLoadingManager.js';
 import { AgentConfigManager } from '@src/core/server/agentConfig.js';
@@ -343,8 +344,10 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
       // StreamableHTTPClientTransport throws:
       //   "StreamableHTTPClientTransport already started!"
       // which leaves the server stuck in Error and silently breaks the
-      // restart-OAuth button. Close it first; ignore close errors since the
-      // transport may be in any intermediate state.
+      // restart-OAuth button. Best-effort close the old transport, then
+      // build a fresh one from the same URL + oauthProvider — the SDK's
+      // close() does NOT reset `_abortController`, so reusing the same
+      // instance still trips the "already started" guard inside start().
       try {
         await clientInfo.transport.close();
       } catch (closeError) {
@@ -353,10 +356,12 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
         );
       }
 
-      // Create new client and attempt connection to trigger OAuth
       const clientManager = ClientManager.getOrCreateInstance();
+      const freshTransport = new TransportRecreator().recreateHttpTransport(clientInfo.transport, serverName);
+      clientManager.replaceTransport(serverName, freshTransport);
+
       const newClient = clientManager.createClientInstance();
-      await newClient.connect(clientInfo.transport);
+      await newClient.connect(freshTransport);
     } catch (error) {
       if (error instanceof OAuthRequiredError) {
         // Update client info with OAuth status

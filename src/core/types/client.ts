@@ -31,7 +31,10 @@ export interface AuthProviderTransport extends EnhancedTransport {
  */
 export interface OutboundConnection {
   readonly name: string;
-  readonly transport: AuthProviderTransport;
+  // Mutable: swapped when the Restart-OAuth flow rebuilds the underlying
+  // transport (the SDK's StreamableHTTP/SSE close() leaves _abortController
+  // in a non-resettable state, so start() throws on reuse).
+  transport: AuthProviderTransport;
   client: Client;
   lastError?: Error;
   lastConnected?: Date;
