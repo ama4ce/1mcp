@@ -15,7 +15,10 @@ runs:
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
       with:
-        version: latest
+        # Pin the major (not `latest`) so a future pnpm release can't silently change install/build-script
+        # behavior and break CI again (e.g. ERR_PNPM_IGNORED_BUILDS). Approved build scripts live in
+        # package.json#pnpm.onlyBuiltDependencies.
+        version: 10
         run_install: false
 
     - name: Setup Node.js
