@@ -30,13 +30,7 @@ import { InternalCapabilitiesProvider } from '@src/core/capabilities/internalCap
 import { byCapabilities } from '@src/core/filtering/clientFiltering.js';
 import { FilteringService } from '@src/core/filtering/filteringService.js';
 import { ServerManager } from '@src/core/server/serverManager.js';
-import {
-  ClientStatus,
-  InboundConnection,
-  MCPServerParams,
-  OutboundConnection,
-  OutboundConnections,
-} from '@src/core/types/index.js';
+import { InboundConnection, MCPServerParams, OutboundConnection, OutboundConnections } from '@src/core/types/index.js';
 import { setLogLevel } from '@src/logger/logger.js';
 import logger from '@src/logger/logger.js';
 import { isMethodNotFoundError, withErrorHandling } from '@src/utils/core/errorHandling.js';
@@ -307,26 +301,25 @@ export function registerRequestHandlers(outboundConns: OutboundConnections, inbo
     return {};
   });
 
-  // Register ping handler
+  // Register ping handler.
+  //
+  // MCP spec: ping is a liveness check for THIS connection only — the
+  // server should return an empty result. The previous implementation
+  // fanned out a downstream ping to every connected upstream on each
+  // incoming ping, which:
+  //   - amplified caller load by N (one inbound -> N outbound),
+  //   - tripped rate limits (e.g. Slack returned "ratelimited" under
+  //     a frequent caller),
+  //   - flooded warn logs for upstreams that don't implement ping
+  //     ("MCP error -32601: Method not found: ping"),
+  //   - contributed to OAuth churn for upstreams whose ping path
+  //     touches token validation (Notion).
+  // Per-upstream liveness now belongs to the keepalive interval in
+  // ClientManager.startKeepalivePing — kept local to each connection,
+  // not driven by external traffic.
   inboundConn.server.setRequestHandler(
     PingRequestSchema,
     withErrorHandling(async () => {
-      // Health check all connected upstream clients
-      const healthCheckPromises = Array.from(outboundConns.entries()).map(async ([clientName, outboundConn]) => {
-        if (outboundConn.status === ClientStatus.Connected && outboundConn.client.transport) {
-          try {
-            await outboundConn.client.ping();
-            logger.info(`Health check successful for client: ${clientName}`);
-          } catch (error) {
-            logger.warn(`Health check failed for client ${clientName}: ${error}`);
-          }
-        }
-      });
-
-      // Wait for all health checks to complete (but don't fail if some fail)
-      await Promise.allSettled(healthCheckPromises);
-
-      // Always return successful pong response
       return {};
     }, 'Error handling ping'),
   );

@@ -143,7 +143,22 @@ export class ClientManager {
       try {
         await client.ping();
       } catch (error) {
-        logger.warn(`Keepalive ping failed for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+        const message = error instanceof Error ? error.message : String(error);
+        // -32601 Method not found: the upstream server doesn't implement
+        // the MCP `ping` method (Slack, some HTTP shims). Sending it every
+        // 60s would spam the warn log forever and, on rate-limited targets
+        // like Slack, even contribute to "ratelimited" responses. Stop the
+        // interval for this server permanently — keepalive only matters for
+        // SSE-style transports that proxies idle-cut, and those that don't
+        // accept ping wouldn't be kept alive by it anyway.
+        if (message.includes('-32601') || /Method not found/i.test(message)) {
+          logger.info(
+            `Keepalive ping disabled for ${name}: upstream does not implement ping (${message.slice(0, 120)})`,
+          );
+          this.stopKeepalivePing(name);
+          return;
+        }
+        logger.warn(`Keepalive ping failed for ${name}: ${message}`);
       }
     };
 
