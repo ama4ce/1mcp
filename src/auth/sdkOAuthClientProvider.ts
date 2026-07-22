@@ -130,6 +130,26 @@ export class SDKOAuthClientProvider implements OAuthClientProvider {
   }
 
   /**
+   * Invalidates only credentials that can no longer be used to access the
+   * upstream provider. Client registration remains intact so the next OAuth
+   * authorization can reuse it without a manual session-file deletion.
+   */
+  invalidateTokens(reason: string): void {
+    const hadTokens = this._tokens !== undefined;
+
+    this._tokens = undefined;
+    this._codeVerifier = undefined;
+    this._state = undefined;
+    this._authorizationUrl = undefined;
+    this.persistAllData();
+
+    logger.warn(`OAuth credentials invalidated for ${this.serverName}`, {
+      reason,
+      hadTokens,
+    });
+  }
+
+  /**
    * Saves PKCE code verifier for the authorization session
    */
   saveCodeVerifier(codeVerifier: string): void {

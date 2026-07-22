@@ -208,6 +208,25 @@ describe('SDKOAuthClientProvider', () => {
       );
     });
 
+    it('should invalidate tokens while preserving client registration', () => {
+      provider.saveClientInformation(mockClientInfo);
+      provider.saveTokens(mockTokens);
+      provider.saveCodeVerifier('test-verifier');
+      provider.state();
+
+      provider.invalidateTokens('invalid_grant');
+
+      expect(provider.tokens()).toBeUndefined();
+      expect(provider.clientInformation()).toEqual(mockClientInfo);
+
+      const lastCall = mockClientSessionRepository.save.mock.calls.slice(-1)[0];
+      const sessionData = lastCall[1] as ClientSessionData;
+      expect(sessionData.tokens).toBeUndefined();
+      expect(sessionData.clientInfo).toBe(JSON.stringify(mockClientInfo));
+      expect(sessionData.codeVerifier).toBeUndefined();
+      expect(sessionData.state).toBeUndefined();
+    });
+
     it('should return undefined when no tokens are set', () => {
       expect(provider.tokens()).toBeUndefined();
     });

@@ -144,6 +144,11 @@ export class ClientManager {
         await client.ping();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const authTransport = transport as AuthProviderTransport;
+        if (this.isOAuthCredentialFailure(error) && authTransport.oauthProvider?.tokens() !== undefined) {
+          this.markAwaitingOAuth(name, authTransport, error);
+          return;
+        }
         // -32601 Method not found: the upstream server doesn't implement
         // the MCP `ping` method (Slack, some HTTP shims). Sending it every
         // 60s would spam the warn log forever and, on rate-limited targets
@@ -183,6 +188,30 @@ export class ClientManager {
       message: `Keepalive ping started for ${name}`,
       meta: { intervalMs, firedImmediately: true },
     }));
+  }
+
+  private isOAuthCredentialFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /\b401\b|unauthori[sz]ed|invalid[ _-]?(?:grant|token)|expired[ _-]?token|refresh[ _-]?token|grant not found/i.test(
+      message,
+    );
+  }
+
+  private markAwaitingOAuth(name: string, transport: AuthProviderTransport, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    transport.oauthProvider?.invalidateTokens(message);
+
+    const clientInfo = this.outboundConns.get(name);
+    if (clientInfo) {
+      clientInfo.status = ClientStatus.AwaitingOAuth;
+      clientInfo.authorizationUrl = undefined;
+      clientInfo.oauthStartTime = new Date();
+      clientInfo.lastError = error instanceof Error ? error : new Error(message);
+    }
+
+    this.instructionAggregator?.removeServer(name);
+    this.stopKeepalivePing(name);
+    logger.warn(`OAuth reauthorization required for ${name}: ${message}`);
   }
 
   private stopKeepalivePing(name: string): void {

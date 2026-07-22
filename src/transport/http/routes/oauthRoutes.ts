@@ -360,17 +360,18 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
       const freshTransport = new TransportRecreator().recreateHttpTransport(clientInfo.transport, serverName);
       clientManager.replaceTransport(serverName, freshTransport);
 
-      const newClient = clientManager.createClientInstance();
-      await newClient.connect(freshTransport);
+      await clientManager.createSingleClient(serverName, freshTransport);
     } catch (error) {
       if (error instanceof OAuthRequiredError) {
-        // Update client info with OAuth status
-        clientInfo.status = ClientStatus.AwaitingOAuth;
-        clientInfo.oauthStartTime = new Date();
+        // createSingleClient replaces the shared connection entry on failure.
+        // Read it again so the dashboard observes the current transport/state.
+        const activeClientInfo = serverManager.getClient(serverName) ?? clientInfo;
+        activeClientInfo.status = ClientStatus.AwaitingOAuth;
+        activeClientInfo.oauthStartTime = new Date();
 
         // Try to get authorization URL from OAuth provider
         try {
-          const oauthProvider = clientInfo.transport.oauthProvider;
+          const oauthProvider = activeClientInfo.transport.oauthProvider;
           if (oauthProvider && typeof oauthProvider.getAuthorizationUrl === 'function') {
             clientInfo.authorizationUrl = oauthProvider.getAuthorizationUrl();
           }
@@ -495,7 +496,7 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
         // Auto-refresh every 30 seconds
         setTimeout(() => window.location.reload(), 30000);
 
-        function restartOAuth(serverName) {
+        function restartConnection(serverName) {
           fetch(\`/oauth/restart/\${serverName}\`, { method: 'POST' })
             .then(response => response.json())
             .then(data => {
@@ -558,7 +559,7 @@ export function createOAuthRoutes(oauthProvider: SDKOAuthServerProvider, loading
         return `<a href="/oauth/authorize/${sanitizeUrlParam(service.name)}" class="btn btn-warning">🔐 Authorize</a>`;
       case ClientStatus.Error:
       case ClientStatus.Disconnected:
-        return `<button onclick="restartOAuth('${sanitizeServerNameForContext(service.name, 'html')}')" class="btn btn-primary">🔄 Restart OAuth</button>`;
+        return `<button onclick="restartConnection('${sanitizeServerNameForContext(service.name, 'html')}')" class="btn btn-primary">🔄 Reconnect</button>`;
       default:
         return `<button onclick="restartOAuth('${sanitizeServerNameForContext(service.name, 'html')}')" class="btn btn-primary">🔄 Start OAuth</button>`;
     }

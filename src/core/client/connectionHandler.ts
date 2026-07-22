@@ -43,7 +43,11 @@ export class ConnectionHandler {
         logger.info(`Successfully connected to ${name} with server ${sv?.name} version ${sv?.version}`);
         return currentClient;
       } catch (error) {
-        if (error instanceof UnauthorizedError) {
+        if (
+          error instanceof UnauthorizedError ||
+          (this.isOAuthCredentialFailure(error) && this.hasOAuthTokens(currentTransport))
+        ) {
+          this.invalidateOAuthCredentials(currentTransport, error);
           const configManager = AgentConfigManager.getInstance();
           logger.info(`OAuth authorization required for ${name}. Visit ${configManager.getUrl()}/oauth to authorize`);
           throw new OAuthRequiredError(name, currentClient);
@@ -79,6 +83,26 @@ export class ConnectionHandler {
     }
 
     throw new ClientConnectionError(name, new Error('Max retries exceeded'));
+  }
+
+  private isOAuthCredentialFailure(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /\b401\b|unauthori[sz]ed|invalid[ _-]?(?:grant|token)|expired[ _-]?token|refresh[ _-]?token|grant not found/i.test(
+      message,
+    );
+  }
+
+  private hasOAuthTokens(transport: Transport): boolean {
+    return (transport as AuthProviderTransport).oauthProvider?.tokens() !== undefined;
+  }
+
+  private invalidateOAuthCredentials(transport: Transport, error: unknown): void {
+    const provider = (transport as AuthProviderTransport).oauthProvider;
+    if (!provider) {
+      return;
+    }
+
+    provider.invalidateTokens(error instanceof Error ? error.message : String(error));
   }
 
   private async createCancellableDelay(ms: number, abortSignal?: AbortSignal): Promise<void> {
