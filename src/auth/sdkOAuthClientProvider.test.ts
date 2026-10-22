@@ -208,23 +208,26 @@ describe('SDKOAuthClientProvider', () => {
       );
     });
 
-    it('should invalidate tokens while preserving client registration', () => {
+    it('should invalidate tokens while preserving client registration and the started authorization', () => {
       provider.saveClientInformation(mockClientInfo);
       provider.saveTokens(mockTokens);
       provider.saveCodeVerifier('test-verifier');
-      provider.state();
+      const state = provider.state();
+      provider.redirectToAuthorization(new URL('https://auth.example.com/authorize?client_id=test'));
 
       provider.invalidateTokens('invalid_grant');
 
       expect(provider.tokens()).toBeUndefined();
       expect(provider.clientInformation()).toEqual(mockClientInfo);
+      expect(provider.codeVerifier()).toBe('test-verifier');
+      expect(provider.getAuthorizationUrl()).toBe('https://auth.example.com/authorize?client_id=test');
 
       const lastCall = mockClientSessionRepository.save.mock.calls.slice(-1)[0];
       const sessionData = lastCall[1] as ClientSessionData;
       expect(sessionData.tokens).toBeUndefined();
       expect(sessionData.clientInfo).toBe(JSON.stringify(mockClientInfo));
-      expect(sessionData.codeVerifier).toBeUndefined();
-      expect(sessionData.state).toBeUndefined();
+      expect(sessionData.codeVerifier).toBe('test-verifier');
+      expect(sessionData.state).toBe(state);
     });
 
     it('should return undefined when no tokens are set', () => {

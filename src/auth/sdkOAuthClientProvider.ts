@@ -133,14 +133,16 @@ export class SDKOAuthClientProvider implements OAuthClientProvider {
    * Invalidates only credentials that can no longer be used to access the
    * upstream provider. Client registration remains intact so the next OAuth
    * authorization can reuse it without a manual session-file deletion.
+   *
+   * The authorization the SDK has just started stays intact too: it stores the
+   * authorization URL, PKCE code verifier and state right before it throws
+   * UnauthorizedError. Clearing them here left the dashboard with "Failed to
+   * generate OAuth URL" and the callback without a code verifier.
    */
   invalidateTokens(reason: string): void {
     const hadTokens = this._tokens !== undefined;
 
     this._tokens = undefined;
-    this._codeVerifier = undefined;
-    this._state = undefined;
-    this._authorizationUrl = undefined;
     this.persistAllData();
 
     logger.warn(`OAuth credentials invalidated for ${this.serverName}`, {

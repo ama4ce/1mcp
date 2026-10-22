@@ -47,7 +47,10 @@ export class ConnectionHandler {
           error instanceof UnauthorizedError ||
           (this.isOAuthCredentialFailure(error) && this.hasOAuthTokens(currentTransport))
         ) {
-          this.invalidateOAuthCredentials(currentTransport, error);
+          // A first authorization has no stale tokens to drop, only the URL the SDK just stored.
+          if (this.hasOAuthTokens(currentTransport)) {
+            this.invalidateOAuthCredentials(currentTransport, error);
+          }
           const configManager = AgentConfigManager.getInstance();
           logger.info(`OAuth authorization required for ${name}. Visit ${configManager.getUrl()}/oauth to authorize`);
           throw new OAuthRequiredError(name, currentClient);
