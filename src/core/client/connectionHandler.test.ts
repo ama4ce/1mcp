@@ -157,6 +157,33 @@ describe('ConnectionHandler', () => {
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('OAuth authorization required'));
     });
 
+    it('should keep a first authorization intact when there are no tokens to invalidate', async () => {
+      const oauthProvider = { tokens: vi.fn().mockReturnValue(undefined), invalidateTokens: vi.fn() };
+      const authTransport = { ...mockTransport, oauthProvider } as unknown as AuthProviderTransport;
+      (mockClient.connect as unknown as MockInstance).mockRejectedValue(new UnauthorizedError('Unauthorized'));
+
+      await expect(
+        connectionHandler.connectWithRetry(mockClient as Client, authTransport, 'test-client'),
+      ).rejects.toThrow(OAuthRequiredError);
+
+      expect(oauthProvider.invalidateTokens).not.toHaveBeenCalled();
+    });
+
+    it('should invalidate stale tokens on an OAuth failure', async () => {
+      const oauthProvider = {
+        tokens: vi.fn().mockReturnValue({ access_token: 'stale', token_type: 'Bearer' }),
+        invalidateTokens: vi.fn(),
+      };
+      const authTransport = { ...mockTransport, oauthProvider } as unknown as AuthProviderTransport;
+      (mockClient.connect as unknown as MockInstance).mockRejectedValue(new UnauthorizedError('Unauthorized'));
+
+      await expect(
+        connectionHandler.connectWithRetry(mockClient as Client, authTransport, 'test-client'),
+      ).rejects.toThrow(OAuthRequiredError);
+
+      expect(oauthProvider.invalidateTokens).toHaveBeenCalledWith('Unauthorized');
+    });
+
     it('should close transport between retries', async () => {
       const mockTransportWithClose = {
         ...mockTransport,
