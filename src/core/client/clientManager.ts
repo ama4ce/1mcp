@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { DEFAULT_MAX_CONCURRENT_LOADS } from '@src/constants/mcp.js';
 import { InstructionAggregator } from '@src/core/instructions/instructionAggregator.js';
@@ -37,6 +37,11 @@ export class ClientManager {
    * connected server; cleared in onclose. stdio transports are exempt.
    */
   private pingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
+  /**
+   * Servers whose upstream session is being re-established, so a burst of
+   * failing pings and requests reconnects once instead of once per error.
+   */
+  private sessionReconnects: Map<string, Promise<void>> = new Map();
   private instructionAggregator?: InstructionAggregator;
   private clientFactory: ClientFactory;
   private connectionHandler: ConnectionHandler;
@@ -113,9 +118,79 @@ export class ClientManager {
 
     client.onerror = (error) => {
       logger.error(`Client ${name} error: ${error}`);
+      if (this.isLostSessionError(error)) {
+        void this.reconnectAfterSessionLoss(name, error);
+      }
     };
 
     this.startKeepalivePing(name, client);
+  }
+
+  /**
+   * The upstream no longer knows our session: a Streamable HTTP server answers 404 for an unknown
+   * mcp-session-id (the MCP spec tells the client to start a new session), which happens whenever
+   * the upstream process restarts while we keep running. mcp-proxy words it "Session not found".
+   */
+  private isLostSessionError(error: unknown): boolean {
+    if (error instanceof StreamableHTTPError && error.code === 404) {
+      return true;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return /session not found/i.test(message);
+  }
+
+  /**
+   * Re-establish a remote client whose session the upstream dropped. Before this, the dead session
+   * id was reused forever: every ping and call failed with "Session not found" and the server's
+   * tools stayed missing until the whole agent restarted (all platform_redis_* after an a4c-dbhub
+   * rollout on 2026-10-30). Reuses the Restart-OAuth path: a fresh transport (same URL, headers and
+   * OAuth provider, no session id) and createSingleClient.
+   */
+  private reconnectAfterSessionLoss(name: string, error: unknown): Promise<void> {
+    const inFlight = this.sessionReconnects.get(name);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const reconnect = (async () => {
+      const current = this.outboundConns.get(name);
+      const transport = current?.transport ?? this.transports[name];
+      if (!(transport instanceof StreamableHTTPClientTransport) && !(transport instanceof SSEClientTransport)) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Upstream session lost for ${name}; reconnecting with a new session`, {
+        reason: message.slice(0, 200),
+      });
+      this.stopKeepalivePing(name);
+
+      if (current?.client) {
+        // The old client must not report the close below as a disconnect of the new one.
+        current.client.onclose = undefined;
+        current.client.onerror = undefined;
+        try {
+          await current.client.close();
+        } catch (closeError) {
+          debugIf(() => ({ message: `Closing the stale client of ${name} failed: ${closeError}` }));
+        }
+      }
+
+      const freshTransport = this.transportRecreator.recreateHttpTransport(transport, name);
+      this.replaceTransport(name, freshTransport);
+      try {
+        await this.createSingleClient(name, freshTransport);
+        logger.info(`Reconnected ${name} after a lost upstream session`);
+      } catch (reconnectError) {
+        const reconnectMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
+        logger.error(`Reconnect of ${name} after a lost upstream session failed: ${reconnectMessage}`);
+      }
+    })();
+
+    this.sessionReconnects.set(name, reconnect);
+    return reconnect.finally(() => {
+      this.sessionReconnects.delete(name);
+    });
   }
 
   /**
@@ -161,6 +236,10 @@ export class ClientManager {
             `Keepalive ping disabled for ${name}: upstream does not implement ping (${message.slice(0, 120)})`,
           );
           this.stopKeepalivePing(name);
+          return;
+        }
+        if (this.isLostSessionError(error)) {
+          void this.reconnectAfterSessionLoss(name, error);
           return;
         }
         logger.warn(`Keepalive ping failed for ${name}: ${message}`);
