@@ -16,6 +16,30 @@ describe('TransportRecreator', () => {
   });
 
   describe('recreateHttpTransport', () => {
+    it('should keep the configured headers and start without the old session id', () => {
+      const original = new StreamableHTTPClientTransport(new URL('https://example.com/mcp'), {
+        requestInit: { headers: { Authorization: 'Bearer secret', 'User-Agent': '1MCP/test' } },
+        sessionId: 'stale-session',
+      }) as AuthProviderTransport;
+
+      const recreated = transportRecreator.recreateHttpTransport(original, 'bearer-server') as any;
+
+      expect(recreated).toBeInstanceOf(StreamableHTTPClientTransport);
+      expect(recreated._requestInit.headers).toEqual({ Authorization: 'Bearer secret', 'User-Agent': '1MCP/test' });
+      expect(recreated._sessionId).toBeUndefined();
+    });
+
+    it('should keep the configured headers of an SSE transport', () => {
+      const original = new SSEClientTransport(new URL('https://example.com/sse'), {
+        requestInit: { headers: { Authorization: 'Bearer secret' } },
+      }) as AuthProviderTransport;
+
+      const recreated = transportRecreator.recreateHttpTransport(original, 'sse-server') as any;
+
+      expect(recreated).toBeInstanceOf(SSEClientTransport);
+      expect(recreated._requestInit.headers).toEqual({ Authorization: 'Bearer secret' });
+    });
+
     describe('StreamableHTTPClientTransport', () => {
       it('should recreate StreamableHTTPClientTransport', () => {
         const originalTransport = {

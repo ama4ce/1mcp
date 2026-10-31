@@ -1,5 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 import { CONNECTION_RETRY, MCP_SERVER_NAME } from '@src/constants.js';
@@ -240,6 +240,69 @@ describe('ClientManager (Integration)', () => {
 
       const clients = clientManager.getClients();
       expect(clients.size).toBe(DEFAULT_MAX_CONCURRENT_LOADS + 2);
+    });
+  });
+
+  describe('lost upstream session', () => {
+    const lostSession = () =>
+      new StreamableHTTPError(
+        404,
+        'Error POSTing to endpoint: {"jsonrpc":"2.0","id":"server-error","error":{"code":-32600,"message":"Session not found"}}',
+      );
+
+    const connectRemote = async (name: string) => {
+      const transport = new StreamableHTTPClientTransport(new URL('http://bridge.local:3074/mcp'), {
+        requestInit: { headers: { 'User-Agent': '1MCP/test' } },
+      }) as AuthProviderTransport;
+      (mockClient.connect as unknown as MockInstance).mockResolvedValue(undefined);
+      (mockClient.getServerVersion as unknown as MockInstance).mockResolvedValue({ name: 'redis', version: '1' });
+      await clientManager.createSingleClient(name, transport);
+      await vi.advanceTimersByTimeAsync(0);
+      return transport;
+    };
+
+    beforeEach(() => {
+      mockClient.ping = vi.fn().mockResolvedValue({});
+    });
+
+    it('reconnects with a new transport when the keepalive ping finds the session gone', async () => {
+      const original = await connectRemote('platform_redis_prod_app');
+      (mockClient.ping as unknown as MockInstance).mockRejectedValueOnce(lostSession());
+      const createSpy = vi.spyOn(clientManager, 'createSingleClient');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockClient.close).toHaveBeenCalled();
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      const fresh = clientManager.getTransport('platform_redis_prod_app') as any;
+      expect(fresh).not.toBe(original);
+      expect(fresh._requestInit.headers).toEqual({ 'User-Agent': '1MCP/test' });
+      expect(clientManager.getClients().get('platform_redis_prod_app')!.status).toBe(ClientStatus.Connected);
+    });
+
+    it('reconnects once when several errors report the lost session together', async () => {
+      await connectRemote('platform_redis_prod_bqs');
+      const createSpy = vi.spyOn(clientManager, 'createSingleClient');
+
+      // Both errors reach the handler captured at connect; the first one detaches it from the old client.
+      const onerror = mockClient.onerror!;
+      onerror(lostSession());
+      onerror(lostSession());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(createSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not reconnect on other ping failures', async () => {
+      await connectRemote('platform_redis_prod_pss');
+      (mockClient.ping as unknown as MockInstance).mockRejectedValueOnce(new Error('socket hang up'));
+      const createSpy = vi.spyOn(clientManager, 'createSingleClient');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(mockClient.close).not.toHaveBeenCalled();
     });
   });
 
